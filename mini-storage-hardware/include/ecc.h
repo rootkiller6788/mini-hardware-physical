@@ -33,4 +33,14 @@ uint8_t ecc_hamming_introduce_error(uint8_t codeword, int bit_position);
 void ecc_bch_encode(const uint8_t *data, uint8_t *codeword);
 int  ecc_bch_decode(const uint8_t *codeword, uint8_t *corrected_data);
 
+/* Reed-Solomon RS(255,239) over GF(2^8) — L8 advanced ECC */
+void ecc_rs_generator_poly(uint8_t *gen);
+void ecc_rs_encode(const uint8_t *data, uint8_t *parity);
+void ecc_rs_syndromes(const uint8_t *data, const uint8_t *parity,
+                      uint8_t *syndromes);
+
+/* Shannon theorem connection — L4 */
+double ecc_shannon_capacity_bsc(double crossover_prob);
+double ecc_coding_gain_db(double uncoded_snr, double coded_snr);
+
 #endif

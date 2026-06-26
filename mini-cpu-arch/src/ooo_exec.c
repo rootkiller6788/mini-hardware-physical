@@ -53,6 +53,14 @@ void ooo_issue(OOOProcessor* p, const Instruction* inst) {
     rs->cycles_left = 1;
     rs->dest       = (uint32_t)rob_idx;
 
+    bool is_imm_op = (inst->opcode == OP_ADDI || inst->opcode == OP_ANDI ||
+                      inst->opcode == OP_ORI || inst->opcode == OP_XORI ||
+                      inst->opcode == OP_SLLI || inst->opcode == OP_SRLI ||
+                      inst->opcode == OP_SRAI || inst->opcode == OP_SLTI ||
+                      inst->opcode == OP_SLTIU || inst->opcode == OP_LW ||
+                      inst->opcode == OP_SW || inst->opcode == OP_LUI ||
+                      inst->opcode == OP_AUIPC || inst->opcode == OP_JALR);
+
     if (inst->rs1 != 0 && !p->reg_status[inst->rs1].ready) {
         rs->qj = p->reg_status[inst->rs1].rob_num;
         rs->qj_valid = true;
@@ -62,19 +70,14 @@ void ooo_issue(OOOProcessor* p, const Instruction* inst) {
         rs->qj_valid = false;
     }
 
-    if (inst->rs2 != 0 && !p->reg_status[inst->rs2].ready) {
-        rs->qk = p->reg_status[inst->rs2].rob_num;
-        rs->qk_valid = true;
-        rs->vk = 0;
-    } else {
-        rs->vk = p->registers[inst->rs2];
+    if (is_imm_op) {
+        rs->vk = (uint32_t)inst->immediate;
         rs->qk_valid = false;
-    }
-
-    if (inst->opcode == OP_SW) {
+    } else {
         if (inst->rs2 != 0 && !p->reg_status[inst->rs2].ready) {
             rs->qk = p->reg_status[inst->rs2].rob_num;
             rs->qk_valid = true;
+            rs->vk = 0;
         } else {
             rs->vk = p->registers[inst->rs2];
             rs->qk_valid = false;
@@ -253,7 +256,7 @@ void ooo_dump(const OOOProcessor* p) {
     }
     printf("\n-- Reorder Buffer --\n");
     for (int i = 0; i < MAX_ROB; i++) {
-        ROBEntry* rob = &p->rob[i];
+        const ROBEntry* rob = &p->rob[i];
         if (rob->busy) {
             printf("  ROB[%02d]: rd=%u ready=%d val=0x%X op=%s pc=0x%X\n",
                    i, rob->rd, rob->ready, rob->value,

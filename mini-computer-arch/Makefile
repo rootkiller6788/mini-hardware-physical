@@ -7,7 +7,9 @@ EXDIR = examples
 OUTDIR = bin
 
 SRCS = $(SRCDIR)/memory_hierarchy.c $(SRCDIR)/cache.c $(SRCDIR)/virtual_memory.c \
-       $(SRCDIR)/multicore.c $(SRCDIR)/interconnect.c $(SRCDIR)/coherence.c
+       $(SRCDIR)/multicore.c $(SRCDIR)/interconnect.c $(SRCDIR)/coherence.c \
+       $(SRCDIR)/pipeline.c $(SRCDIR)/predictor.c $(SRCDIR)/prefetch.c \
+       $(SRCDIR)/perf_counters.c $(SRCDIR)/dram_controller.c
 
 OBJS = $(SRCS:.c=.o)
 
@@ -52,19 +54,19 @@ test: all
 	@echo   Running Cache Simulator Demo
 	@echo ========================================
 	$(OUTDIR)/cache_sim_demo.exe
-	@echo.
+	@echo
 	@echo ========================================
 	@echo   Running TLB Demo
 	@echo ========================================
 	$(OUTDIR)/tlb_demo.exe
-	@echo.
+	@echo
 	@echo ========================================
 	@echo   Running Bus / Interconnect Demo
 	@echo ========================================
 	$(OUTDIR)/bus_demo.exe
-	@echo.
+	@echo
 	@echo ========================================
-	@echo   Running Coherence (MESI) Demo
+	@echo   Running Coherence MESI Demo
 	@echo ========================================
 	$(OUTDIR)/coherence_demo.exe
 

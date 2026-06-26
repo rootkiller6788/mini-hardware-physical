@@ -7,7 +7,8 @@
 
 #define SIZE 8
 
-static void dense_matmul(float *A, float *B, int rows, int cols, int inner, float *C) {
+static void dense_matmul(float *A, float *B, int rows, int cols_unused, int inner, float *C) {
+    (void)cols_unused;
     for (int i = 0; i < rows; i++) {
         C[i] = 0.0f;
         for (int k = 0; k < inner; k++) {
@@ -91,7 +92,7 @@ int main(void) {
     printf("  Max error: %.6f\n", max_diff);
 
     printf("\n=== Operations Comparison ===\n");
-    float speedup = sparse_compute_reduction(weights, input_vec, SIZE * SIZE);
+    (void)sparse_compute_reduction(weights, input_vec, SIZE * SIZE);
     int dense_ops = SIZE * SIZE;
     int dense_nnz = 0;
     for (int i = 0; i < SIZE * SIZE; i++) {

@@ -115,6 +115,7 @@ void switch_flood(SwitchFabric *sw, int src_port,
                   const uint8_t *frame, int frame_len)
 {
     if (!sw || src_port < 0 || src_port >= sw->num_ports) return;
+    (void)frame; /* Frame content not inspected during flooding */
 
     for (int p = 0; p < sw->num_ports; p++) {
         if (p == src_port) continue;

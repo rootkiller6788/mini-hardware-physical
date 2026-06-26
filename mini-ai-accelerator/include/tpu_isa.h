@@ -58,4 +58,22 @@ void tpu_print_state(TPUCore *tpu);
 uint32_t tpu_ub_alloc(TPUCore *tpu, uint32_t size_bytes);
 void tpu_ub_free(TPUCore *tpu);
 
+/* ---- L7: Multi-core TPU orchestration ---- */
+typedef struct TPUMultiCore TPUMultiCore;
+TPUMultiCore *tpu_multicore_init(int num_cores, uint32_t ub_size_mb_per_core);
+void tpu_multicore_destroy(TPUMultiCore *mc);
+void tpu_multicore_distribute_batch(TPUMultiCore *mc, int total_batch_size);
+void tpu_multicore_execute_parallel(TPUMultiCore *mc, TPUInstruction *program, int prog_len);
+
+/* ---- L3: Pipelined instruction execution ---- */
+typedef struct TPUPipeline TPUPipeline;
+TPUPipeline *tpu_pipeline_init(void);
+void tpu_pipeline_destroy(TPUPipeline *pipe);
+void tpu_pipeline_step(TPUPipeline *pipe, TPUInstruction *fetch_inst, TPUCore *tpu);
+
+/* ---- L7: DMA descriptor management ---- */
+void tpu_dma_submit(uint32_t src, uint32_t dst, uint32_t size);
+bool tpu_dma_poll_complete(int dma_id);
+void tpu_dma_flush(void);
+
 #endif

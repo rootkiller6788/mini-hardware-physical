@@ -1,64 +1,84 @@
-CC      = gcc
-CFLAGS  = -Wall -Wextra -O2 -I include
+CC = gcc
+CFLAGS = -Wall -Wextra -O2 -I include
 LDFLAGS = -lm
-SRCDIR  = src
-EXDIR   = examples
-OUTDIR  = bin
 
-SRCS    = $(SRCDIR)/simd.c $(SRCDIR)/warp.c $(SRCDIR)/shader_core.c \
-          $(SRCDIR)/tensor_core.c $(SRCDIR)/memory_gpu.c $(SRCDIR)/thread_sched.c
+SRCDIR = src
+EXDIR = examples
+TSTDIR = tests
+OUTDIR = bin
 
-.PHONY: all test clean
+SRCS = $(SRCDIR)/simd.c $(SRCDIR)/warp.c $(SRCDIR)/shader_core.c \
+       $(SRCDIR)/tensor_core.c $(SRCDIR)/memory_gpu.c $(SRCDIR)/thread_sched.c
 
-all: simd_demo warp_sim_demo tensor_op_demo coalescing_demo occupancy_demo
+all: $(OUTDIR) test_suite simd_demo warp_demo sm_occupancy_demo gemm_demo mem_demo sched_demo
 
 $(OUTDIR):
-	@mkdir -p "$(OUTDIR)"
+	mkdir -p $(OUTDIR)
 
-simd_demo: $(OUTDIR) $(SRCS) $(EXDIR)/simd_demo.c
+# --- Test suite ---
+test_suite: $(TSTDIR)/test_suite.c $(SRCS)
+	$(CC) $(CFLAGS) $(TSTDIR)/test_suite.c $(SRCS) -o $(OUTDIR)/test_suite $(LDFLAGS)
+
+# --- Examples ---
+simd_demo: $(EXDIR)/simd_demo.c $(SRCDIR)/simd.c
 	$(CC) $(CFLAGS) $(EXDIR)/simd_demo.c $(SRCDIR)/simd.c -o $(OUTDIR)/simd_demo $(LDFLAGS)
 
-warp_sim_demo: $(OUTDIR) $(SRCS) $(EXDIR)/warp_sim_demo.c
-	$(CC) $(CFLAGS) $(EXDIR)/warp_sim_demo.c $(SRCDIR)/simd.c $(SRCDIR)/warp.c -o $(OUTDIR)/warp_sim_demo $(LDFLAGS)
+warp_demo: $(EXDIR)/warp_demo.c $(SRCDIR)/warp.c
+	$(CC) $(CFLAGS) $(EXDIR)/warp_demo.c $(SRCDIR)/warp.c -o $(OUTDIR)/warp_demo $(LDFLAGS)
 
-tensor_op_demo: $(OUTDIR) $(SRCS) $(EXDIR)/tensor_op_demo.c
-	$(CC) $(CFLAGS) $(EXDIR)/tensor_op_demo.c $(SRCDIR)/tensor_core.c -o $(OUTDIR)/tensor_op_demo $(LDFLAGS)
+sm_occupancy_demo: $(EXDIR)/sm_occupancy_demo.c $(SRCDIR)/shader_core.c $(SRCDIR)/warp.c $(SRCDIR)/memory_gpu.c
+	$(CC) $(CFLAGS) $(EXDIR)/sm_occupancy_demo.c $(SRCDIR)/shader_core.c $(SRCDIR)/warp.c $(SRCDIR)/memory_gpu.c -o $(OUTDIR)/sm_occupancy_demo $(LDFLAGS)
 
-coalescing_demo: $(OUTDIR) $(SRCS) $(EXDIR)/coalescing_demo.c
-	$(CC) $(CFLAGS) $(EXDIR)/coalescing_demo.c $(SRCDIR)/memory_gpu.c -o $(OUTDIR)/coalescing_demo $(LDFLAGS)
+gemm_demo: $(EXDIR)/gemm_demo.c $(SRCDIR)/tensor_core.c
+	$(CC) $(CFLAGS) $(EXDIR)/gemm_demo.c $(SRCDIR)/tensor_core.c -o $(OUTDIR)/gemm_demo $(LDFLAGS)
 
-occupancy_demo: $(OUTDIR) $(SRCS) $(EXDIR)/occupancy_demo.c
-	$(CC) $(CFLAGS) $(EXDIR)/occupancy_demo.c $(SRCDIR)/thread_sched.c $(SRCDIR)/simd.c $(SRCDIR)/warp.c $(SRCDIR)/shader_core.c -o $(OUTDIR)/occupancy_demo $(LDFLAGS)
+mem_demo: $(EXDIR)/mem_demo.c $(SRCDIR)/memory_gpu.c
+	$(CC) $(CFLAGS) $(EXDIR)/mem_demo.c $(SRCDIR)/memory_gpu.c -o $(OUTDIR)/mem_demo $(LDFLAGS)
 
+sched_demo: $(EXDIR)/sched_demo.c $(SRCDIR)/thread_sched.c
+	$(CC) $(CFLAGS) $(EXDIR)/sched_demo.c $(SRCDIR)/thread_sched.c -o $(OUTDIR)/sched_demo $(LDFLAGS)
+
+# --- Test target ---
 test: all
 	@echo ========================================
-	@echo Running SIMD Demo
+	@echo   Running GPU-Arch Test Suite
 	@echo ========================================
-	@$(OUTDIR)/simd_demo
-	@echo ""
+	./$(OUTDIR)/test_suite
 	@echo ========================================
-	@echo Running Warp Simulation Demo
+	@echo   Running simd_demo
 	@echo ========================================
-	@$(OUTDIR)/warp_sim_demo
-	@echo ""
+	./$(OUTDIR)/simd_demo
 	@echo ========================================
-	@echo Running Tensor Operations Demo
+	@echo   Running warp_demo
 	@echo ========================================
-	@$(OUTDIR)/tensor_op_demo
-	@echo ""
+	./$(OUTDIR)/warp_demo
 	@echo ========================================
-	@echo Running Memory Coalescing Demo
+	@echo   Running sm_occupancy_demo
 	@echo ========================================
-	@$(OUTDIR)/coalescing_demo
-	@echo ""
+	./$(OUTDIR)/sm_occupancy_demo
 	@echo ========================================
-	@echo Running Occupancy Calculator Demo
+	@echo   Running gemm_demo
 	@echo ========================================
-	@$(OUTDIR)/occupancy_demo
-	@echo ""
+	./$(OUTDIR)/gemm_demo
 	@echo ========================================
-	@echo All tests completed!
+	@echo   Running mem_demo
+	@echo ========================================
+	./$(OUTDIR)/mem_demo
+	@echo ========================================
+	@echo   Running sched_demo
+	@echo ========================================
+	./$(OUTDIR)/sched_demo
+	@echo ========================================
+	@echo   All tests and demos PASSED
 	@echo ========================================
 
 clean:
-	@rm -rf "$(OUTDIR)"
+	rm -rf $(OUTDIR)
+
+bench: all
+	@echo ========================================
+	@echo   Running GPU-Arch Benchmarks
+	@echo ========================================
+	./$(OUTDIR)/test_suite bench
+
+.PHONY: all test clean bench

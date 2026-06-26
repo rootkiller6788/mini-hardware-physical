@@ -32,4 +32,21 @@ void systolic_cycle(SystolicArray *sa);
 void systolic_run(SystolicArray *sa, float *activations, float *weights, int M, int N, int K, float *result);
 void systolic_print_state(SystolicArray *sa);
 
+/* ---- L3: Output Stationary dataflow mode ---- */
+void systolic_run_output_stationary(SystolicArray *sa, float *activations,
+                                     float *weights, int M, int N, int K,
+                                     float *result);
+
+/* ---- L3: Double-buffered weight loading ---- */
+typedef struct DoubleBufferSA DoubleBufferSA;
+DoubleBufferSA *sa_double_buffer_create(int rows, int cols);
+void sa_double_buffer_destroy(DoubleBufferSA *db);
+void sa_double_buffer_load_shadow(DoubleBufferSA *db, float *weights,
+                                   int rows, int cols);
+void sa_double_buffer_swap(DoubleBufferSA *db);
+
+/* ---- L4: Utilization efficiency analysis ---- */
+double systolic_utilization_efficiency(int M, int N, int K, int array_h, int array_w);
+int systolic_count_cycles(int M, int N, int K, int array_h, int array_w);
+
 #endif

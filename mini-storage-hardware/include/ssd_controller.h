@@ -68,6 +68,33 @@ int  ssdc_submit_io(SSDController *ctrl, IOType type, uint32_t lba,
                     const uint8_t *data);
 void ssdc_process(SSDController *ctrl, uint64_t cycles);
 int  ssdc_complete(SSDController *ctrl, IOCommand *out_cmd);
+
+/* Channel Interleaving — L3 */
+int  ssdc_interleaved_submit(SSDController *ctrl, IOType type,
+                             uint32_t lba, const uint8_t *data);
+
+/* Power State Management PS0-PS4 — L7 */
+typedef enum {
+    SSDC_PS0_FULL = 0, SSDC_PS1_LIGHT = 1, SSDC_PS2_MEDIUM = 2,
+    SSDC_PS3_DEEP = 3, SSDC_PS4_OFF = 4
+} SSDPowerState;
+void   ssdc_power_init(void);
+int    ssdc_power_transition(SSDPowerState target);
+int    ssdc_power_auto_transition(uint64_t idle_us);
+double ssdc_power_get_watts(void);
+
+/* Thermal Throttling — L8 */
+void   ssdc_thermal_init(void);
+void   ssdc_thermal_update(double power_watts, double dt_seconds);
+double ssdc_thermal_get_throttle(void);
+
+/* QoS-Weighted Scheduling — L5 */
+typedef enum {
+    SSDC_QOS_HIGH = 0, SSDC_QOS_MEDIUM = 1, SSDC_QOS_LOW = 2
+} SSDIOPriority;
+void ssdc_qos_init(void);
+int  ssdc_qos_select_queue(void);
+
 void ssdc_print_queue(const SSDController *ctrl);
 
 #endif

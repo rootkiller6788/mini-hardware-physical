@@ -83,7 +83,19 @@ void pipeline_decode(Pipeline* p) {
     p->id_ex.imm   = inst.immediate;
 
     p->id_ex.rs1_val = p->isa.registers[inst.rs1 & 0xF];
-    p->id_ex.rs2_val = p->isa.registers[inst.rs2 & 0xF];
+
+    bool is_imm_op = (inst.opcode == OP_ADDI || inst.opcode == OP_ANDI ||
+                      inst.opcode == OP_ORI  || inst.opcode == OP_XORI ||
+                      inst.opcode == OP_SLLI || inst.opcode == OP_SRLI ||
+                      inst.opcode == OP_SRAI || inst.opcode == OP_SLTI ||
+                      inst.opcode == OP_SLTIU || inst.opcode == OP_LW  ||
+                      inst.opcode == OP_SW   || inst.opcode == OP_LB  ||
+                      inst.opcode == OP_SB);
+    if (is_imm_op) {
+        p->id_ex.rs2_val = (uint32_t)inst.immediate;
+    } else {
+        p->id_ex.rs2_val = p->isa.registers[inst.rs2 & 0xF];
+    }
 
     p->id_ex.reg_write_en = 0;
     p->id_ex.mem_read  = false;
@@ -129,40 +141,64 @@ void pipeline_execute(Pipeline* p) {
     uint32_t b = p->forward_b ? p->forward_b_val : p->id_ex.rs2_val;
     int32_t  sa = (int32_t)a;
     int32_t  sb = (int32_t)b;
+    uint32_t imm = (uint32_t)p->id_ex.imm;
     uint32_t result = 0;
 
     Instruction inst = p->id_ex.inst;
     switch (inst.opcode) {
-        case OP_ADD: case OP_ADDI: result = a + b; break;
-        case OP_SUB: result = a - b; break;
-        case OP_AND: case OP_ANDI: result = a & b; break;
-        case OP_OR:  case OP_ORI:  result = a | b; break;
-        case OP_XOR: case OP_XORI: result = a ^ b; break;
-        case OP_SLL: case OP_SLLI: result = a << (b & 0x1F); break;
-        case OP_SRL: case OP_SRLI: result = a >> (b & 0x1F); break;
-        case OP_SRA: case OP_SRAI: result = (uint32_t)(sa >> (b & 0x1F)); break;
-        case OP_SLT: case OP_SLTI: result = (sa < sb) ? 1 : 0; break;
-        case OP_SLTU: case OP_SLTIU: result = (a < (uint32_t)inst.immediate) ? 1 : 0; break;
-        case OP_LUI: case OP_AUIPC:
-            result = (inst.opcode == OP_LUI) ? (uint32_t)inst.immediate : p->id_ex.pc + (uint32_t)inst.immediate;
-            break;
+        case OP_ADD:  result = a + b; break;
+        case OP_ADDI: result = a + imm; break;
+        case OP_SUB:  result = a - b; break;
+        case OP_AND:  result = a & b; break;
+        case OP_ANDI: result = a & imm; break;
+        case OP_OR:   result = a | b; break;
+        case OP_ORI:  result = a | imm; break;
+        case OP_XOR:  result = a ^ b; break;
+        case OP_XORI: result = a ^ imm; break;
+        case OP_SLL:  result = a << (b & 0x1F); break;
+        case OP_SLLI: result = a << (imm & 0x1F); break;
+        case OP_SRL:  result = a >> (b & 0x1F); break;
+        case OP_SRLI: result = a >> (imm & 0x1F); break;
+        case OP_SRA:  result = (uint32_t)(sa >> (b & 0x1F)); break;
+        case OP_SRAI: result = (uint32_t)(sa >> (imm & 0x1F)); break;
+        case OP_SLT:  result = (sa < sb) ? 1 : 0; break;
+        case OP_SLTI: result = (sa < (int32_t)imm) ? 1 : 0; break;
+        case OP_SLTU:  result = (a < b) ? 1 : 0; break;
+        case OP_SLTIU: result = (a < imm) ? 1 : 0; break;
+        case OP_LUI:   result = imm; break;
+        case OP_AUIPC: result = p->id_ex.pc + imm; break;
         case OP_LW: case OP_LB:
-            result = a + (uint32_t)inst.immediate;
+            result = a + imm;
             break;
         case OP_SW: case OP_SB:
-            result = a + (uint32_t)inst.immediate;
+            result = a + imm;
             break;
         case OP_BEQ:
-            if (a == b) { p->id_ex.branch_taken = true; result = p->id_ex.pc + (uint32_t)inst.immediate; }
+            if (a == b) { p->id_ex.branch_taken = true; result = p->id_ex.pc + imm; }
             else { p->id_ex.branch_taken = false; result = p->id_ex.pc + 4; }
             break;
         case OP_BNE:
-            if (a != b) { p->id_ex.branch_taken = true; result = p->id_ex.pc + (uint32_t)inst.immediate; }
+            if (a != b) { p->id_ex.branch_taken = true; result = p->id_ex.pc + imm; }
             else { p->id_ex.branch_taken = false; result = p->id_ex.pc + 4; }
             break;
-        case OP_JAL: case OP_JALR:
-            result = (inst.opcode == OP_JAL) ? p->id_ex.pc + (uint32_t)inst.immediate : (a + (uint32_t)inst.immediate) & ~1u;
+        case OP_BLT:
+            if (sa < sb)      { p->id_ex.branch_taken = true;  result = p->id_ex.pc + imm; }
+            else              { p->id_ex.branch_taken = false; result = p->id_ex.pc + 4; }
             break;
+        case OP_BGE:
+            if (sa >= sb)     { p->id_ex.branch_taken = true;  result = p->id_ex.pc + imm; }
+            else              { p->id_ex.branch_taken = false; result = p->id_ex.pc + 4; }
+            break;
+        case OP_BLTU:
+            if (a < b)        { p->id_ex.branch_taken = true;  result = p->id_ex.pc + imm; }
+            else              { p->id_ex.branch_taken = false; result = p->id_ex.pc + 4; }
+            break;
+        case OP_BGEU:
+            if (a >= b)       { p->id_ex.branch_taken = true;  result = p->id_ex.pc + imm; }
+            else              { p->id_ex.branch_taken = false; result = p->id_ex.pc + 4; }
+            break;
+        case OP_JAL:  result = p->id_ex.pc + imm; break;
+        case OP_JALR: result = (a + imm) & ~1u; break;
         default: break;
     }
 

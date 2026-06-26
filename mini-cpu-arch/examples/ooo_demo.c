@@ -11,10 +11,6 @@ static uint32_t itype(uint8_t op, uint8_t rd, uint8_t rs1, int16_t imm, uint8_t 
     return (uint32_t)(((imm & 0xFFF) << 20) | (rs1 << 15) | (f3 << 12) | (rd << 7) | op);
 }
 
-static uint32_t raw_to_inst_tomasulo(uint32_t raw) {
-    return raw;
-}
-
 int main(void) {
     printf("=== mini-cpu-arch: OOO Execution Demo ===\n\n");
 

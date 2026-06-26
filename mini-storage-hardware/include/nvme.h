@@ -81,6 +81,43 @@ int  nvme_submit_admin_cmd(NVMeController *ctrl, NVMeCommand *cmd);
 int  nvme_submit_io_cmd(NVMeController *ctrl, uint32_t qid, NVMeCommand *cmd);
 int  nvme_process_cq(NVMeController *ctrl, uint32_t qid,
                      NVMeCompletion *out_comp);
+
+/* PRP / Scatter-Gather List — L3 */
+#define NVME_PRP_ENTRIES_PER_PAGE (NVME_SECTOR_SIZE / sizeof(uint64_t))
+typedef struct { uint64_t entries[NVME_PRP_ENTRIES_PER_PAGE]; uint32_t count; } PRPList;
+void nvme_prp_list_init(PRPList *prp);
+int  nvme_prp_add_entry(PRPList *prp, uint64_t phys_addr);
+int  nvme_build_prp(const uint8_t *buffer, uint32_t length, PRPList *prp);
+
+/* Identify Controller Data — L1/L3 */
+typedef struct {
+    uint16_t pci_vid; uint16_t pci_svid;
+    char sn[24]; char mn[44]; char fr[12];
+    uint32_t nn; uint32_t ver; uint16_t maxcmd;
+    uint8_t mdts; uint8_t sqes; uint8_t cqes;
+    uint16_t oncs;
+} IdentifyController;
+void nvme_identify_controller(IdentifyController *id);
+void nvme_print_identify(const IdentifyController *id);
+
+/* Namespace Management — L3 */
+typedef struct {
+    uint64_t nsze; uint64_t ncap; uint64_t nuse;
+    uint8_t  flbas; uint8_t nlbaf;
+} IdentifyNamespace;
+void nvme_identify_namespace(IdentifyNamespace *ns, uint32_t nsid, uint64_t ns_size);
+
+/* SQ Arbitration (RR/WRR) — L5 */
+typedef struct {
+    uint8_t  weights[NVME_MAX_IO_QUEUES];
+    uint32_t remaining_burst[NVME_MAX_IO_QUEUES];
+    uint32_t current_sq;
+    uint32_t arb_burst;
+} NVMeArbiter;
+void nvme_arbiter_init(NVMeArbiter *arb, uint32_t burst);
+void nvme_arbiter_set_weight(NVMeArbiter *arb, uint32_t qid, uint8_t weight);
+int  nvme_arbiter_next_sq(NVMeArbiter *arb);
+
 void nvme_print_regs(const NVMeController *ctrl);
 
 #endif

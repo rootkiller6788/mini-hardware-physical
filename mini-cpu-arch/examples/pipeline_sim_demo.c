@@ -11,11 +11,6 @@ static uint32_t itype(uint8_t op, uint8_t rd, uint8_t rs1, int16_t imm, uint8_t 
     return (uint32_t)(((imm & 0xFFF) << 20) | (rs1 << 15) | (f3 << 12) | (rd << 7) | op);
 }
 
-static const char* stage_name(int s) {
-    static const char* names[] = {"IF", "ID", "EX", "MEM", "WB"};
-    return (s >= 0 && s < 5) ? names[s] : "??";
-}
-
 static void print_pipe_diagram(const Pipeline* p) {
     printf("\n  +--------+--------+--------+--------+--------+\n");
     printf("  |  IF    |  ID    |  EX    |  MEM   |  WB    |\n");

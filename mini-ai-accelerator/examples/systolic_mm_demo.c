@@ -4,16 +4,16 @@
 #include <string.h>
 #include <stdint.h>
 
-#define N 4
+#define MAT_SIZE 4
 
-static void naive_matmul(float *A, float *B, int M, int N, int K, float *C) {
+static void naive_matmul(float *A, float *B, int M, int Ncols, int K, float *C) {
     for (int i = 0; i < M; i++) {
-        for (int j = 0; j < N; j++) {
+        for (int j = 0; j < Ncols; j++) {
             float sum = 0.0f;
             for (int k = 0; k < K; k++) {
-                sum += A[i * K + k] * B[k * N + j];
+                sum += A[i * K + k] * B[k * Ncols + j];
             }
-            C[i * N + j] = sum;
+            C[i * Ncols + j] = sum;
         }
     }
 }
@@ -34,31 +34,31 @@ int main(void) {
     printf("  Systolic Array Matrix Multiplication Demo\n");
     printf("=========================================================\n\n");
 
-    float A[N * N] = {
+    float A[MAT_SIZE * MAT_SIZE] = {
         1.0f, 2.0f, 3.0f, 4.0f,
         5.0f, 6.0f, 7.0f, 8.0f,
         9.0f, 10.0f, 11.0f, 12.0f,
         13.0f, 14.0f, 15.0f, 16.0f
     };
 
-    float B[N * N] = {
+    float B[MAT_SIZE * MAT_SIZE] = {
         0.5f, 1.0f, 1.5f, 2.0f,
         2.5f, 3.0f, 3.5f, 4.0f,
         4.5f, 5.0f, 5.5f, 6.0f,
         6.5f, 7.0f, 7.5f, 8.0f
     };
 
-    print_matrix(A, N, N, "A");
-    print_matrix(B, N, N, "B");
+    print_matrix(A, MAT_SIZE, MAT_SIZE, "A");
+    print_matrix(B, MAT_SIZE, MAT_SIZE, "B");
 
-    SystolicArray *sa = systolic_array_create(N, N);
+    SystolicArray *sa = systolic_array_create(MAT_SIZE, MAT_SIZE);
     if (!sa) {
         fprintf(stderr, "Failed to create systolic array\n");
         return 1;
     }
 
-    float *C_naive = (float *)calloc(N * N, sizeof(float));
-    float *C_systolic = (float *)calloc(N * N, sizeof(float));
+    float *C_naive = (float *)calloc(MAT_SIZE * MAT_SIZE, sizeof(float));
+    float *C_systolic = (float *)calloc(MAT_SIZE * MAT_SIZE, sizeof(float));
     if (!C_naive || !C_systolic) {
         fprintf(stderr, "Memory allocation failed\n");
         systolic_array_destroy(sa);
@@ -66,19 +66,19 @@ int main(void) {
         return 1;
     }
 
-    naive_matmul(A, B, N, N, N, C_naive);
-    print_matrix(C_naive, N, N, "Expected C = A x B (naive)");
+    naive_matmul(A, B, MAT_SIZE, MAT_SIZE, MAT_SIZE, C_naive);
+    print_matrix(C_naive, MAT_SIZE, MAT_SIZE, "Expected C = A x B (naive)");
 
     printf("\n--- Systolic Array Execution ---\n");
-    systolic_load_weights(sa, B, N, N);
+    systolic_load_weights(sa, B, MAT_SIZE, MAT_SIZE);
 
-    int total_cycles = 3 * N - 2;
+    int total_cycles = 3 * MAT_SIZE - 2;
     for (int cycle = 0; cycle < total_cycles; cycle++) {
         printf("\n=== Cycle %d ===\n", cycle);
 
-        for (int j = 0; j < N; j++) {
-            if (cycle < N) {
-                sa->input_fifo[j] = A[cycle * N + j];
+        for (int j = 0; j < MAT_SIZE; j++) {
+            if (cycle < MAT_SIZE) {
+                sa->input_fifo[j] = A[cycle * MAT_SIZE + j];
             } else {
                 sa->input_fifo[j] = 0.0f;
             }
@@ -89,18 +89,18 @@ int main(void) {
     }
 
     printf("\n--- Systolic Array Result ---\n");
-    for (int i = 0; i < N; i++) {
-        C_systolic[i] = sa->cells[i][N - 1].accumulator;
+    for (int i = 0; i < MAT_SIZE; i++) {
+        C_systolic[i] = sa->cells[i][MAT_SIZE - 1].accumulator;
     }
-    print_matrix(C_systolic, 1, N, "Systolic output (last column)");
+    print_matrix(C_systolic, 1, MAT_SIZE, "Systolic output (last column)");
 
     printf("\n--- Verification ---\n");
     int mismatches = 0;
-    for (int i = 0; i < N; i++) {
-        float diff = C_naive[i * N + 0] - C_systolic[i];
+    for (int i = 0; i < MAT_SIZE; i++) {
+        float diff = C_naive[i * MAT_SIZE] - C_systolic[i];
         if (diff < 0.0f) diff = -diff;
         if (diff > 0.01f) {
-            printf("  MISMATCH at row %d: expected %.2f, got %.2f\n", i, C_naive[i * N], C_systolic[i]);
+            printf("  MISMATCH at row %d: expected %.2f, got %.2f\n", i, C_naive[i * MAT_SIZE], C_systolic[i]);
             mismatches++;
         }
     }

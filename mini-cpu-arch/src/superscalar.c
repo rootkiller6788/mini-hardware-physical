@@ -82,7 +82,7 @@ void superscalar_dispatch(Superscalar* s) {
         }
 
         int32_t sa = (int32_t)a;
-        int32_t sb = (int32_t)b;
+        (void)b; /* sb only needed for certain opcodes */
         uint32_t result = 0;
 
         switch (inst->opcode) {

@@ -7,8 +7,9 @@
 #define FTL_MAX_LBAS          16384
 #define FTL_MAX_PHYSICAL_PAGES 65536
 #define FTL_PAGES_PER_BLOCK    128
-#define FTL_BLOCKS_PER_PLANE   64
+#define FTL_BLOCKS_PER_PLANE   16
 #define FTL_PLANES             4
+#define FTL_PAGE_DATA_SIZE     4096
 
 typedef enum {
     PAGE_TYPE_LOWER,
@@ -40,7 +41,7 @@ typedef struct {
     uint32_t  id;
     PageType  type;
     PageState state;
-    uint8_t   data[4096];
+    uint8_t   data[FTL_PAGE_DATA_SIZE];
 } FlashPage;
 
 typedef struct {
@@ -75,6 +76,24 @@ void ftl_init(FTL *ftl, FTLMappingMode mode);
 int  ftl_read(const FTL *ftl, uint32_t lba, uint8_t *out_data);
 int  ftl_write(FTL *ftl, uint32_t lba, const uint8_t *data);
 int  ftl_trim(FTL *ftl, uint32_t lba);
+int  ftl_allocate_block(FTL *ftl, uint32_t start_lba, uint32_t num_pages);
+
+/* SLC write buffer (Turbo Write) — L8 */
+void ftl_slc_buffer_init(void);
+int  ftl_slc_buffer_write(FTL *ftl, uint32_t lba, const uint8_t *data);
+int  ftl_slc_buffer_flush(FTL *ftl);
+
+/* Hot/cold data separation — L5 */
+void   ftl_hotcold_init(void);
+bool   ftl_is_hot_lba(uint32_t lba);
+void   ftl_track_update(uint32_t lba);
+double ftl_hot_data_ratio(void);
+
+/* Merge cost analysis for log-block FTL — L5 */
+double ftl_merge_cost_estimate(uint32_t valid_pages_in_data,
+                               uint32_t valid_pages_in_log,
+                               uint32_t pages_per_block);
+
 void ftl_print_stats(const FTL *ftl);
 
 #endif

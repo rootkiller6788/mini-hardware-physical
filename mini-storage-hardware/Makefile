@@ -1,23 +1,25 @@
 CC       = gcc
 CFLAGS   = -Wall -Wextra -O2 -I include
-LDFLAGS  = -lm
+LDFLAGS  = -lm -Wl,--stack,268435456
 SRCDIR   = src
 EXDIR    = examples
 OUTDIR   = bin
 
 SRCS     = $(SRCDIR)/ftl.c $(SRCDIR)/ssd_controller.c $(SRCDIR)/nvme.c \
-           $(SRCDIR)/wear_leveling.c $(SRCDIR)/gc.c $(SRCDIR)/ecc.c
+           $(SRCDIR)/wear_leveling.c $(SRCDIR)/gc.c $(SRCDIR)/ecc.c \
+           $(SRCDIR)/ldpc.c $(SRCDIR)/nand_model.c $(SRCDIR)/endurance.c
 
 OBJS     = $(SRCS:.c=.o)
 
-DEMOS    = ftl_demo wear_level_demo gc_demo nvme_cmd_demo ecc_demo
+DEMOS    = ftl_demo wear_level_demo gc_demo nvme_cmd_demo ecc_demo \
+           integration_test
 
 .PHONY: all test clean
 
 all: $(DEMOS)
 
 $(OUTDIR):
-	if not exist "$(OUTDIR)" mkdir "$(OUTDIR)"
+	mkdir -p $(OUTDIR)
 
 ftl_demo: $(SRCDIR)/ftl.o $(EXDIR)/ftl_demo.c | $(OUTDIR)
 	$(CC) $(CFLAGS) $(SRCDIR)/ftl.o $(EXDIR)/ftl_demo.c -o $(OUTDIR)/ftl_demo $(LDFLAGS)
@@ -33,6 +35,17 @@ nvme_cmd_demo: $(SRCDIR)/nvme.o $(EXDIR)/nvme_cmd_demo.c | $(OUTDIR)
 
 ecc_demo: $(SRCDIR)/ecc.o $(EXDIR)/ecc_demo.c | $(OUTDIR)
 	$(CC) $(CFLAGS) $(SRCDIR)/ecc.o $(EXDIR)/ecc_demo.c -o $(OUTDIR)/ecc_demo $(LDFLAGS)
+
+integration_test: $(SRCDIR)/ftl.o $(SRCDIR)/gc.o $(SRCDIR)/wear_leveling.o \
+                  $(SRCDIR)/nvme.o $(SRCDIR)/ecc.o $(SRCDIR)/ldpc.o \
+                  $(SRCDIR)/nand_model.o $(SRCDIR)/endurance.o \
+                  $(SRCDIR)/ssd_controller.o \
+                  $(EXDIR)/integration_test.c | $(OUTDIR)
+	$(CC) $(CFLAGS) $(SRCDIR)/ftl.o $(SRCDIR)/gc.o $(SRCDIR)/wear_leveling.o \
+	    $(SRCDIR)/nvme.o $(SRCDIR)/ecc.o $(SRCDIR)/ldpc.o \
+	    $(SRCDIR)/nand_model.o $(SRCDIR)/endurance.o \
+	    $(SRCDIR)/ssd_controller.o \
+	    $(EXDIR)/integration_test.c -o $(OUTDIR)/integration_test $(LDFLAGS)
 
 $(SRCDIR)/ftl.o: $(SRCDIR)/ftl.c include/ftl.h
 	$(CC) $(CFLAGS) -c $(SRCDIR)/ftl.c -o $(SRCDIR)/ftl.o
@@ -52,24 +65,35 @@ $(SRCDIR)/gc.o: $(SRCDIR)/gc.c include/gc.h include/ftl.h include/wear_leveling.
 $(SRCDIR)/ecc.o: $(SRCDIR)/ecc.c include/ecc.h
 	$(CC) $(CFLAGS) -c $(SRCDIR)/ecc.c -o $(SRCDIR)/ecc.o
 
+$(SRCDIR)/ldpc.o: $(SRCDIR)/ldpc.c include/ldpc.h
+	$(CC) $(CFLAGS) -c $(SRCDIR)/ldpc.c -o $(SRCDIR)/ldpc.o
+
+$(SRCDIR)/nand_model.o: $(SRCDIR)/nand_model.c include/nand_model.h
+	$(CC) $(CFLAGS) -c $(SRCDIR)/nand_model.c -o $(SRCDIR)/nand_model.o
+
+$(SRCDIR)/endurance.o: $(SRCDIR)/endurance.c include/endurance.h
+	$(CC) $(CFLAGS) -c $(SRCDIR)/endurance.c -o $(SRCDIR)/endurance.o
+
 test: all
-	@echo Running FTL Demo...
+	@echo "Running FTL Demo..."
 	$(OUTDIR)/ftl_demo
-	@echo.
-	@echo Running Wear Leveling Demo...
+	@echo ""
+	@echo "Running Wear Leveling Demo..."
 	$(OUTDIR)/wear_level_demo
-	@echo.
-	@echo Running GC Demo...
+	@echo ""
+	@echo "Running GC Demo..."
 	$(OUTDIR)/gc_demo
-	@echo.
-	@echo Running NVMe Command Demo...
+	@echo ""
+	@echo "Running NVMe Command Demo..."
 	$(OUTDIR)/nvme_cmd_demo
-	@echo.
-	@echo Running ECC Demo...
+	@echo ""
+	@echo "Running ECC Demo..."
 	$(OUTDIR)/ecc_demo
-	@echo.
-	@echo All demos completed.
+	@echo ""
+	@echo "Running Integration Test..."
+	$(OUTDIR)/integration_test
+	@echo ""
+	@echo "All tests passed."
 
 clean:
-	if exist "$(OUTDIR)" rmdir /s /q "$(OUTDIR)"
-	if exist "$(SRCDIR)\*.o" del /q "$(SRCDIR)\*.o"
+	rm -rf $(OUTDIR) $(SRCDIR)/*.o

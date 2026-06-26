@@ -35,6 +35,23 @@ void  wl_init(WearLeveler *wl, FTL *ftl, WearLevelAlgorithm algo,
 bool  wl_check_and_balance(WearLeveler *wl);
 int   wl_select_block(const WearLeveler *wl);
 void  wl_update_stats(WearLeveler *wl);
+
+/* Endurance Prediction — L4/L8 */
+void wl_init_endurance_prediction(double rated_pe_cycles);
+void wl_update_endurance_prediction(const WearLeveler *wl,
+                                    double writes_per_hour);
+void wl_print_endurance_prediction(void);
+
+/* Data Retention Tracking — L4 */
+void wl_init_retention_tracker(void);
+void wl_update_retention(const WearLeveler *wl);
+void wl_print_retention(const WearLeveler *wl);
+
+/* Static Wear Leveling Migration — L5 */
+int  wl_static_migration_plan(const WearLeveler *wl,
+                              uint32_t *source_block,
+                              uint32_t *dest_block);
+
 void  wl_print_stats(const WearLeveler *wl);
 
 #endif

@@ -20,10 +20,6 @@ int main(void) {
     printf("Pattern: TTTNTNTN (repeating 8x)\n");
     printf("Total branches: %zu\n\n", PATTERN_LEN);
 
-    const char* type_names[] = {
-        "Always Taken", "Always Not Taken", "Bimodal", "Two-Level", "Gshare"
-    };
-
     BranchPredictor predictors[PRED_TYPE_COUNT];
     for (int t = 0; t < PRED_TYPE_COUNT; t++) {
         bp_create(&predictors[t], (PredictorType)t);

@@ -72,6 +72,7 @@ void sparse_csr_from_dense(float *dense, int rows, int cols, SparseMatrix *spars
 
 void sparse_spmm(SparseMatrix *A, float *dense_B, int K, float *result) {
     if (!A || !dense_B || !result) return;
+    (void)K;
 
     for (int i = 0; i < A->rows; i++) {
         result[i] = 0.0f;
@@ -180,4 +181,410 @@ void sparse_accel_load_weights(SparseAccelerator *sa, float *weights, int rows, 
 void sparse_accel_compute(SparseAccelerator *sa, float *input, float *output) {
     if (!sa || !input || !output || !sa->weight_sparse_matrix) return;
     sparse_spmm(sa->weight_sparse_matrix, input, sa->weight_sparse_matrix->cols, output);
+}
+
+/* ==========================================================================
+ * L5: Block-CSR (BCSR) — Fixed-Size Block Sparse Format
+ *
+ * Groups non-zero values into fixed-size blocks (e.g., 4×4). This improves
+ * memory coalescing and register reuse on GPUs. Popularized by DeepMind's
+ * Block-Sparse GPU Kernels (Gray et al., 2017).
+ *
+ * Storage:
+ *   - row_ptr: [num_block_rows + 1] — row pointer for block rows
+ *   - col_idx: [nnz_blocks] — column index of each block
+ *   - values: [nnz_blocks × block_size × block_size] — dense blocks
+ *
+ * Complexity: O(nnz_blocks × block_size²) vs O(nnz) for CSR
+ * When blocks are dense internally, BCSR has lower metadata overhead.
+ * ========================================================================== */
+
+BCSRMatrix *bcsr_create(int rows, int cols) {
+    BCSRMatrix *bcsr = (BCSRMatrix *)malloc(sizeof(BCSRMatrix));
+    if (!bcsr) {
+        fprintf(stderr, "bcsr_create: malloc failed\n");
+        return NULL;
+    }
+    memset(bcsr, 0, sizeof(BCSRMatrix));
+    bcsr->rows       = rows;
+    bcsr->cols       = cols;
+    bcsr->block_rows = (rows + BCSR_BLOCK_SIZE - 1) / BCSR_BLOCK_SIZE;
+    bcsr->block_cols = (cols + BCSR_BLOCK_SIZE - 1) / BCSR_BLOCK_SIZE;
+
+    bcsr->row_ptr = (int *)calloc(bcsr->block_rows + 1, sizeof(int));
+    bcsr->col_idx = NULL;
+    bcsr->values  = NULL;
+    bcsr->nnz_blocks = 0;
+
+    if (!bcsr->row_ptr) {
+        fprintf(stderr, "bcsr_create: malloc failed for row_ptr\n");
+        free(bcsr);
+        return NULL;
+    }
+    return bcsr;
+}
+
+void bcsr_destroy(BCSRMatrix *bcsr) {
+    if (!bcsr) return;
+    free(bcsr->row_ptr);
+    free(bcsr->col_idx);
+    free(bcsr->values);
+    free(bcsr);
+}
+
+void bcsr_from_dense(float *dense, int rows, int cols, BCSRMatrix *bcsr) {
+    if (!dense || !bcsr) return;
+
+    int br = bcsr->block_rows;
+    int bc = bcsr->block_cols;
+    int bs = BCSR_BLOCK_SIZE;
+
+    /* First pass: count non-zero blocks */
+    int nnz_blocks = 0;
+    for (int bi = 0; bi < br; bi++) {
+        int block_nnz_count = 0;
+        for (int bj = 0; bj < bc; bj++) {
+            int has_nonzero = 0;
+            for (int r = 0; r < bs && !has_nonzero; r++) {
+                int ri = bi * bs + r;
+                if (ri >= rows) break;
+                for (int c = 0; c < bs; c++) {
+                    int ci = bj * bs + c;
+                    if (ci >= cols) break;
+                    if (fabsf(dense[ri * cols + ci]) > 1e-7f) {
+                        has_nonzero = 1;
+                        break;
+                    }
+                }
+            }
+            if (has_nonzero) block_nnz_count++;
+        }
+        nnz_blocks += block_nnz_count;
+    }
+
+    /* Allocate BCSR storage */
+    bcsr->nnz_blocks = nnz_blocks;
+    free(bcsr->col_idx);
+    free(bcsr->values);
+    bcsr->col_idx = (int *)malloc(nnz_blocks * sizeof(int));
+    bcsr->values  = (float *)calloc(nnz_blocks * bs * bs, sizeof(float));
+    if (!bcsr->col_idx || !bcsr->values) {
+        fprintf(stderr, "bcsr_from_dense: malloc failed\n");
+        bcsr->nnz_blocks = 0;
+        return;
+    }
+
+    /* Second pass: fill BCSR */
+    int block_idx = 0;
+    bcsr->row_ptr[0] = 0;
+    for (int bi = 0; bi < br; bi++) {
+        for (int bj = 0; bj < bc; bj++) {
+            int has_nonzero = 0;
+            for (int r = 0; r < bs; r++) {
+                int ri = bi * bs + r;
+                if (ri >= rows) break;
+                for (int c = 0; c < bs; c++) {
+                    int ci = bj * bs + c;
+                    if (ci >= cols) break;
+                    float val = dense[ri * cols + ci];
+                    bcsr->values[block_idx * bs * bs + r * bs + c] = val;
+                    if (fabsf(val) > 1e-7f) has_nonzero = 1;
+                }
+            }
+            if (has_nonzero) {
+                bcsr->col_idx[block_idx] = bj;
+                block_idx++;
+            }
+        }
+        bcsr->row_ptr[bi + 1] = block_idx;
+    }
+}
+
+void bcsr_spmm(BCSRMatrix *bcsr, float *dense_x, float *result) {
+    if (!bcsr || !dense_x || !result) return;
+
+    int bs = BCSR_BLOCK_SIZE;
+    memset(result, 0, bcsr->rows * sizeof(float));
+
+    for (int bi = 0; bi < bcsr->block_rows; bi++) {
+        for (int idx = bcsr->row_ptr[bi]; idx < bcsr->row_ptr[bi + 1]; idx++) {
+            int bj = bcsr->col_idx[idx];
+            float *block = bcsr->values + idx * bs * bs;
+
+            for (int r = 0; r < bs; r++) {
+                int ri = bi * bs + r;
+                if (ri >= bcsr->rows) break;
+                float sum = 0.0f;
+                for (int c = 0; c < bs; c++) {
+                    int ci = bj * bs + c;
+                    if (ci >= bcsr->cols) break;
+                    sum += block[r * bs + c] * dense_x[ci];
+                }
+                result[ri] += sum;
+            }
+        }
+    }
+}
+
+/* ==========================================================================
+ * L5: ELLPACK Format — Fixed-Width GPU Sparse Matrix
+ *
+ * Each row has exactly `max_nnz_per_row` entries. Zero-padding fills
+ * short rows. Suitable for GPU SIMD where uniform row lengths enable
+ * coalesced memory access and regular control flow.
+ *
+ * This is used in CUSPARSE's ELL format for SpMV on GPUs (NVIDIA).
+ * Optimal when per-row non-zero variance is small.
+ * ========================================================================== */
+
+ELLMatrix *ell_create(int rows, int cols, int max_nnz_per_row) {
+    ELLMatrix *ell = (ELLMatrix *)malloc(sizeof(ELLMatrix));
+    if (!ell) {
+        fprintf(stderr, "ell_create: malloc failed\n");
+        return NULL;
+    }
+    memset(ell, 0, sizeof(ELLMatrix));
+    ell->rows           = rows;
+    ell->cols           = cols;
+    ell->max_nnz_per_row = max_nnz_per_row;
+
+    int entries = rows * max_nnz_per_row;
+    ell->col_idx = (int *)calloc(entries, sizeof(int));
+    ell->values  = (float *)calloc(entries, sizeof(float));
+
+    if (!ell->col_idx || !ell->values) {
+        fprintf(stderr, "ell_create: malloc failed for arrays\n");
+        free(ell->col_idx);
+        free(ell->values);
+        free(ell);
+        return NULL;
+    }
+
+    /* Initialize col_idx to -1 (sentinel for padding) */
+    for (int i = 0; i < entries; i++) {
+        ell->col_idx[i] = -1;
+    }
+    return ell;
+}
+
+void ell_destroy(ELLMatrix *ell) {
+    if (!ell) return;
+    free(ell->col_idx);
+    free(ell->values);
+    free(ell);
+}
+
+void ell_from_dense(float *dense, int rows, int cols, ELLMatrix *ell) {
+    if (!dense || !ell) return;
+
+    int max_nnz = ell->max_nnz_per_row;
+    for (int i = 0; i < rows; i++) {
+        int nnz_count = 0;
+        for (int j = 0; j < cols && nnz_count < max_nnz; j++) {
+            float val = dense[i * cols + j];
+            if (fabsf(val) > 1e-7f) {
+                int idx = i * max_nnz + nnz_count;
+                ell->col_idx[idx] = j;
+                ell->values[idx]  = val;
+                nnz_count++;
+            }
+        }
+        /* Remaining entries are already zero from calloc and col_idx=-1 */
+    }
+}
+
+void ell_spmv(ELLMatrix *ell, float *x, float *y) {
+    if (!ell || !x || !y) return;
+
+    int max_nnz = ell->max_nnz_per_row;
+    for (int i = 0; i < ell->rows; i++) {
+        float sum = 0.0f;
+        for (int k = 0; k < max_nnz; k++) {
+            int idx = i * max_nnz + k;
+            int col = ell->col_idx[idx];
+            if (col < 0) break; /* padding sentinel */
+            sum += ell->values[idx] * x[col];
+        }
+        y[i] = sum;
+    }
+}
+
+/* ==========================================================================
+ * L8: Block-Sparse Attention Pattern
+ *
+ * Many transformer models exhibit block-sparse attention patterns:
+ * local windows, global tokens, and random blocks. This reduces
+ * O(N²) attention to O(N × num_blocks) by attending only over
+ * selected block pairs.
+ *
+ * Patterns: sliding window (local), dilated sliding window,
+ *           random (BigBird), global+local (Longformer).
+ * ========================================================================== */
+
+BlockSparsePattern *block_sparse_create(int num_blocks, int block_size) {
+    BlockSparsePattern *bsp = (BlockSparsePattern *)malloc(sizeof(BlockSparsePattern));
+    if (!bsp) {
+        fprintf(stderr, "block_sparse_create: malloc failed\n");
+        return NULL;
+    }
+    memset(bsp, 0, sizeof(BlockSparsePattern));
+    bsp->num_blocks = num_blocks;
+    bsp->block_size = block_size;
+    int total = num_blocks * num_blocks;
+
+    bsp->block_mask = (int *)calloc(total, sizeof(int));
+    bsp->values     = (float *)calloc(total * block_size * block_size, sizeof(float));
+
+    if (!bsp->block_mask || !bsp->values) {
+        fprintf(stderr, "block_sparse_create: malloc failed for arrays\n");
+        free(bsp->block_mask);
+        free(bsp->values);
+        free(bsp);
+        return NULL;
+    }
+    return bsp;
+}
+
+void block_sparse_destroy(BlockSparsePattern *bsp) {
+    if (!bsp) return;
+    free(bsp->block_mask);
+    free(bsp->values);
+    free(bsp);
+}
+
+void block_sparse_random_mask(BlockSparsePattern *bsp, float density) {
+    if (!bsp) return;
+    int nb = bsp->num_blocks;
+    /* Always keep diagonal blocks (local attention) */
+    for (int i = 0; i < nb; i++) {
+        for (int j = 0; j < nb; j++) {
+            if (i == j) {
+                bsp->block_mask[i * nb + j] = 1;
+            } else {
+                float r = (float)rand() / (float)RAND_MAX;
+                bsp->block_mask[i * nb + j] = (r < density) ? 1 : 0;
+            }
+        }
+    }
+}
+
+void block_sparse_matmul(BlockSparsePattern *bsp, float *A, float *B, float *C,
+                          int M, int N, int K) {
+    if (!bsp || !A || !B || !C) return;
+
+    int nb = bsp->num_blocks;
+    int bs = bsp->block_size;
+
+    /* Initialize C to zero */
+    memset(C, 0, M * N * sizeof(float));
+
+    int m_blocks = (M + bs - 1) / bs;
+    int n_blocks = (N + bs - 1) / bs;
+    int k_blocks = (K + bs - 1) / bs;
+
+    for (int mi = 0; mi < m_blocks && mi < nb; mi++) {
+        for (int ni = 0; ni < n_blocks && ni < nb; ni++) {
+            if (!bsp->block_mask[mi * nb + ni]) continue;
+
+            for (int ki = 0; ki < k_blocks; ki++) {
+                for (int r = 0; r < bs; r++) {
+                    int mr = mi * bs + r;
+                    if (mr >= M) break;
+                    for (int c = 0; c < bs; c++) {
+                        int nc = ni * bs + c;
+                        if (nc >= N) break;
+                        float sum = 0.0f;
+                        for (int kk = 0; kk < bs; kk++) {
+                            int k_idx = ki * bs + kk;
+                            if (k_idx >= K) break;
+                            sum += A[mr * K + k_idx] * B[k_idx * N + nc];
+                        }
+                        C[mr * N + nc] += sum;
+                    }
+                }
+            }
+        }
+    }
+}
+
+float block_sparse_compression_ratio(BlockSparsePattern *bsp, int total_blocks) {
+    if (!bsp || total_blocks <= 0) return 0.0f;
+
+    int active_blocks = 0;
+    int nb = bsp->num_blocks;
+    for (int i = 0; i < nb * nb; i++) {
+        if (bsp->block_mask[i]) active_blocks++;
+    }
+
+    return (float)active_blocks / (float)total_blocks;
+}
+
+/* ==========================================================================
+ * L5: Iterative Magnitude Pruning
+ *
+ * Gradual pruning: remove smallest-magnitude weights over multiple iterations.
+ * This produces better accuracy than one-shot pruning because the network
+ * can recover between pruning steps (Frankle & Carbin, ICLR 2019 -
+ * "The Lottery Ticket Hypothesis").
+ *
+ * Algorithm: Gradual Magnitude Pruning (GMP)
+ *   1. Sort weights by magnitude
+ *   2. Zero out smallest p% per iteration
+ *   3. Repeat until target_sparsity reached
+ * ========================================================================== */
+
+static int compare_abs_float(const void *a, const void *b) {
+    float fa = fabsf(*(const float *)a);
+    float fb = fabsf(*(const float *)b);
+    if (fa < fb) return -1;
+    if (fa > fb) return 1;
+    return 0;
+}
+
+void sparse_iterative_prune(float *weights, int rows, int cols,
+                             float target_sparsity, int iterations) {
+    if (!weights || iterations <= 0) return;
+
+    int total = rows * cols;
+    float *sorted = (float *)malloc(total * sizeof(float));
+    if (!sorted) return;
+
+    float current_sparsity = sparse_compute_sparsity(weights, rows, cols);
+    float sparsity_per_iter = (target_sparsity - current_sparsity) / (float)iterations;
+
+    for (int iter = 0; iter < iterations; iter++) {
+        /* Copy current weights, find threshold magnitude */
+        memcpy(sorted, weights, total * sizeof(float));
+        qsort(sorted, total, sizeof(float), compare_abs_float);
+
+        int keep_count = total - (int)(total * (current_sparsity + sparsity_per_iter));
+        if (keep_count >= total) keep_count = total - 1;
+        if (keep_count < 1) keep_count = 1;
+
+        float threshold = fabsf(sorted[total - keep_count]);
+
+        /* Zero out weights below threshold */
+        for (int i = 0; i < total; i++) {
+            if (fabsf(weights[i]) < threshold) {
+                weights[i] = 0.0f;
+            }
+        }
+
+        current_sparsity += sparsity_per_iter;
+        if (current_sparsity >= target_sparsity) break;
+    }
+
+    free(sorted);
+}
+
+float sparse_compute_sparsity(float *weights, int rows, int cols) {
+    if (!weights) return 0.0f;
+    int total = rows * cols;
+    if (total <= 0) return 0.0f;
+
+    int zeros = 0;
+    for (int i = 0; i < total; i++) {
+        if (fabsf(weights[i]) < 1e-7f) zeros++;
+    }
+    return (float)zeros / (float)total;
 }
